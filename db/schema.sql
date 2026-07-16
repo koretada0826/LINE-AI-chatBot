@@ -58,6 +58,14 @@ create table if not exists learned_patterns (
   created_at   timestamptz not null default now()
 );
 
+-- LINEアクセストークンの保存（自動更新：期限が近づくとBotが自動で再発行して上書き）
+create table if not exists line_tokens (
+  channel_id text primary key,
+  token      text not null,
+  expires_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+
 -- ↓↓↓ 次フェーズ（テナント分離・オンボーディング）で使う土台。今は作るだけでOK ↓↓↓
 
 -- 企業マスタ（テナント分離の起点）
