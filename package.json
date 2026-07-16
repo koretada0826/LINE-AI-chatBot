@@ -1,6 +1,6 @@
 {
   "name": "saishoku-care-line-bot",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "才職CARE LINE AI相談チャットボット",
   "type": "module",
@@ -8,7 +8,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@google/genai": "^1.0.0",
+    "@anthropic-ai/sdk": "^0.68.0",
     "@supabase/supabase-js": "^2.45.0"
   }
 }
