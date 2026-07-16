@@ -3,7 +3,7 @@
 // 流れ：署名検証 → イベント処理 → 会話履歴読込 → 安全ガード →
 //       Claude で一次対応＋区分判定 → LINE返信 → 履歴/ログ保存 → 必要ならエスカレーション通知
 // ============================================================
-import { verifySignature, replyText } from "../lib/line.js";
+import { verifySignature, replyText, replyMessages } from "../lib/line.js";
 import { consult } from "../lib/ai.js";
 import { detectCritical } from "../lib/safety.js";
 import {
@@ -18,6 +18,8 @@ import {
   isHumanMode,
 } from "../lib/store.js";
 import { sendOperatorAlert } from "../lib/notify.js";
+import { getEmployee } from "../lib/tenant.js";
+import { handleOnboarding, isRegistered } from "../lib/onboarding.js";
 
 // 有人テイクオーバー（緊急時にBotが引いて人が対応するモード）を使うか
 const ENABLE_HUMAN_TAKEOVER = process.env.ENABLE_HUMAN_TAKEOVER === "true";
@@ -52,9 +54,10 @@ async function notifyEscalation(userId, result, lastUserText) {
   await sendOperatorAlert(msg);
 }
 
-async function handleTextMessage(event) {
+async function handleTextMessage(event, employee) {
   const userId = event.source?.userId;
   const userText = event.message.text;
+  const companyId = employee?.company_id ?? null; // 会社ごとに分離
 
   // 0) 有人テイクオーバー中なら、Botは前に出ず、人へ引き継ぐ（放置回避に保留メッセージだけ返す）
   if (ENABLE_HUMAN_TAKEOVER && (await isHumanMode(userId))) {
@@ -94,17 +97,17 @@ async function handleTextMessage(event) {
   // 4) ユーザーへ返信
   await replyText(event.replyToken, result.reply);
 
-  // 5) 履歴・ログ・学習を保存
-  await appendTurn(userId, "user", userText);
-  await appendTurn(userId, "assistant", result.reply);
-  await logConsultation(userId, result);
+  // 5) 履歴・ログ・学習を保存（会社IDで分離・集計）
+  await appendTurn(userId, "user", userText, companyId);
+  await appendTurn(userId, "assistant", result.reply, companyId);
+  await logConsultation(userId, result, companyId);
   // 継続学習：相手の長期メモを更新し、ナレッジの穴を記録する
   await saveUserMemory(userId, result.memory_update);
   await logCoverageGap(userId, result);
 
   // 6) 緊急なら「人へつなぐ」：記録＋運営へアラート（＋設定時は有人へ引き継ぎ）
   if (result.escalate) {
-    await logEscalation(userId, result);
+    await logEscalation(userId, result, companyId);
     await notifyEscalation(userId, result, userText);
     if (ENABLE_HUMAN_TAKEOVER) {
       await setHumanMode(userId); // 以降しばらくBotは前に出ず、人が対応
@@ -137,26 +140,51 @@ export default async function handler(req, res) {
   await Promise.all(
     events.map(async (event) => {
       try {
-        // 友だち追加（初回）→ 温かいあいさつで相談の入口をひらく
+        const userId = event.source?.userId;
+
+        // 友だち追加（初回）→ 登録フローを開始
         if (event.type === "follow") {
-          await replyText(
-            event.replyToken,
-            "はじめまして、来てくださってありがとうございます😊\n" +
-              "ここは、仕事のモヤモヤやしんどさを、社外の相手にこっそり話せる場所です。上司や人事に伝わることはないので、安心してくださいね。\n" +
-              "ちょっとした愚痴でも大丈夫。今日はどんなことが気になっていますか？"
-          );
+          const r = await handleOnboarding(userId, event);
+          await replyMessages(event.replyToken, r.messages);
           return;
         }
-        // テキストメッセージ → AI相談
-        if (event.type === "message" && event.message?.type === "text") {
-          await handleTextMessage(event);
+
+        // postback（会社選択・悩みカテゴリの選択）→ 登録フロー
+        if (event.type === "postback") {
+          const emp = await getEmployee(userId);
+          if (!isRegistered(emp)) {
+            const r = await handleOnboarding(userId, event);
+            await replyMessages(event.replyToken, r.messages);
+          }
           return;
         }
-        // スタンプ・画像など非テキスト → やさしくテキストへ誘導
+
         if (event.type === "message") {
+          const emp = await getEmployee(userId);
+
+          // ★未登録 → 登録が終わるまで相談機能はロック（オンボーディングへ）
+          if (!isRegistered(emp)) {
+            if (event.message?.type === "text") {
+              const r = await handleOnboarding(userId, event);
+              await replyMessages(event.replyToken, r.messages);
+            } else {
+              await replyText(
+                event.replyToken,
+                "登録を進めています。お手数ですが、テキストで入力してくださいね。"
+              );
+            }
+            return;
+          }
+
+          // 登録済み → AI相談（会社IDで分離）
+          if (event.message?.type === "text") {
+            await handleTextMessage(event, emp);
+            return;
+          }
+          // 非テキスト
           await replyText(
             event.replyToken,
-            "メッセージありがとうございます😊 いまはテキストでのご相談を受けています。よかったら、気になっていることを言葉で聞かせてもらえますか？"
+            "メッセージありがとうございます😊 いまはテキストでのご相談を受けています。よかったら、言葉で聞かせてもらえますか？"
           );
         }
       } catch (err) {
