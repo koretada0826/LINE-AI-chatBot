@@ -55,8 +55,14 @@ export default async function handler(req, res) {
           prevTotal: rep.prevTotal,
           escalations: rep.escalations,
           prevEscalations: rep.prevEscalations,
-          categoryTrends: rep.categoryTrends,
-          topics: rep.byTopic.slice(0, 10),
+          // 主役＝相談テーマ(topic)の傾向。前期比(delta)付き。
+          themeTrends: rep.topicTrends,
+          // 従＝社内の対応区分（日本語ラベル済み）。参考情報。
+          handlingBreakdown: rep.byCategory.map((c) => ({
+            label: c.label,
+            count: c.count,
+            pct: c.pct,
+          })),
         });
       } catch (e) {
         console.error("execSummary failed:", e.message);
