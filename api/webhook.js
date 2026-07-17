@@ -10,8 +10,8 @@ import {
   getHistory,
   appendTurn,
   logConsultation,
-  getUserMemory,
-  saveUserMemory,
+  getUserProfile,
+  saveUserProfile,
   logCoverageGap,
   logEscalation,
   setHumanMode,
@@ -71,20 +71,29 @@ async function handleTextMessage(event, employee) {
     return;
   }
 
-  // 1) 会話履歴＋この相手の長期メモを読み込み、今回の発言を足す
-  const [history, userMemory] = await Promise.all([
+  // 1) 会話履歴＋この相手の蓄積プロフィールを読み込み、今回の発言を足す
+  const [history, prof] = await Promise.all([
     getHistory(userId),
-    getUserMemory(userId),
+    getUserProfile(userId),
   ]);
   history.push({ role: "user", content: userText });
+  // 前回の相談からの経過日数（「お久しぶりです」等の自然な会話に使う）
+  const daysSince = prof.updated_at
+    ? Math.floor((Date.now() - Date.parse(prof.updated_at)) / 86400000)
+    : null;
 
   // 2) 決定論的な安全ガード（AI判定と二重チェック）
   const criticalHint = detectCritical(userText);
 
-  // 3) Claude で一次対応＋区分判定（長期メモを踏まえる）
+  // 3) Claude で一次対応＋区分判定（蓄積プロフィールを踏まえる＝どんどん学ぶ）
   let result;
   try {
-    result = await consult(history, { criticalHint, userMemory });
+    result = await consult(history, {
+      criticalHint,
+      profile: prof.profile,
+      daysSince,
+      name: employee?.name || "",
+    });
   } catch (err) {
     console.error("consult error:", err);
     await replyText(
@@ -101,8 +110,8 @@ async function handleTextMessage(event, employee) {
   await appendTurn(userId, "user", userText, companyId);
   await appendTurn(userId, "assistant", result.reply, companyId);
   await logConsultation(userId, result, companyId);
-  // 継続学習：相手の長期メモを更新し、ナレッジの穴を記録する
-  await saveUserMemory(userId, result.memory_update);
+  // 継続学習：相手のプロフィールを積み上げ更新し、ナレッジの穴を記録する
+  await saveUserProfile(userId, result.profile_update);
   await logCoverageGap(userId, result);
 
   // 6) 緊急なら「人へつなぐ」：記録＋運営へアラート（＋設定時は有人へ引き継ぎ）
