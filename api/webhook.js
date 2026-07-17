@@ -54,6 +54,39 @@ async function notifyEscalation(userId, result, lastUserText) {
   await sendOperatorAlert(msg);
 }
 
+// AIの選択肢＋常設「人と話したい」を、LINEクイックリプライとして返信メッセージに付ける
+function withQuickReplies(text, suggested = []) {
+  const items = [];
+  for (const label of (suggested || []).slice(0, 4)) {
+    const s = String(label || "").trim().slice(0, 20);
+    if (s) items.push({ type: "action", action: { type: "message", label: s, text: s } });
+  }
+  // 常に有人接続の入口を添える（要件5-2：能動的に人へ切り替えられるように）
+  items.push({
+    type: "action",
+    action: {
+      type: "postback",
+      label: "👤 人と話したい",
+      data: "want_human",
+      displayText: "人と話したい",
+    },
+  });
+  return { type: "text", text, quickReply: { items: items.slice(0, 13) } };
+}
+
+// 「人と話したい」をタップ → 有人接続を運営へ依頼（要件5-2：能動的な有人切替）
+async function handleWantHuman(event, employee) {
+  const userId = event.source?.userId;
+  const companyId = employee?.company_id ?? null;
+  await replyText(
+    event.replyToken,
+    "承知しました。担当のメンター（人）におつなぎします🤝\n順番にご案内するので、少しだけお待ちくださいね。\n（お急ぎで危険を感じるときは、よりそいホットライン 0120-279-338 も24時間ご利用いただけます）"
+  );
+  await sendOperatorAlert(
+    `🙋 有人相談のご希望です（「人と話したい」）\n会社ID: ${companyId ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${userId}\n→ メンター接続をお願いします。`
+  );
+}
+
 async function handleTextMessage(event, employee) {
   const userId = event.source?.userId;
   const userText = event.message.text;
@@ -103,8 +136,10 @@ async function handleTextMessage(event, employee) {
     return;
   }
 
-  // 4) ユーザーへ返信
-  await replyText(event.replyToken, result.reply);
+  // 4) ユーザーへ返信（状況に応じた選択肢＋「人と話したい」ボタン付き）
+  await replyMessages(event.replyToken, [
+    withQuickReplies(result.reply, result.suggested_replies),
+  ]);
 
   // 5) 履歴・ログ・学習を保存（会社IDで分離・集計）
   await appendTurn(userId, "user", userText, companyId);
@@ -158,12 +193,16 @@ export default async function handler(req, res) {
           return;
         }
 
-        // postback（会社選択・悩みカテゴリの選択）→ 登録フロー
+        // postback（会社選択・悩みカテゴリの選択）→ 登録フロー／登録済みは有人接続希望
         if (event.type === "postback") {
           const emp = await getEmployee(userId);
           if (!isRegistered(emp)) {
             const r = await handleOnboarding(userId, event);
             await replyMessages(event.replyToken, r.messages);
+            return;
+          }
+          if (event.postback?.data === "want_human") {
+            await handleWantHuman(event, emp);
           }
           return;
         }
