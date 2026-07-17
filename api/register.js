@@ -5,7 +5,7 @@
 // 本人のLINE IDは署名付きURLで受け取り、なりすまし登録を防ぐ。
 // ============================================================
 import { verifyUid } from "../lib/formauth.js";
-import { listCompanies, getCompany, upsertEmployee } from "../lib/tenant.js";
+import { getCompanyByCode, upsertEmployee } from "../lib/tenant.js";
 import { pushText } from "../lib/line.js";
 
 const PHONE_RE = /^[0-9+\-() ]{10,15}$/;
@@ -27,23 +27,22 @@ export default async function handler(req, res) {
   if (req.method === "POST") {
     const b = req.body || {};
     const errors = [];
-    if (!b.company_id) errors.push("会社を選んでください");
+    if (!b.company_code?.trim()) errors.push("企業番号を入力してください");
     if (!b.name?.trim()) errors.push("氏名を入力してください");
     if (!b.role_title?.trim()) errors.push("役職を入力してください");
     if (!PHONE_RE.test((b.phone || "").trim())) errors.push("電話番号の形式が正しくありません");
     if (!EMAIL_RE.test((b.email || "").trim())) errors.push("メールアドレスの形式が正しくありません");
 
     let company = null;
-    if (b.company_id) company = await getCompany(Number(b.company_id));
-    if (!company) errors.push("会社の選択が正しくありません");
+    if (b.company_code?.trim()) company = await getCompanyByCode(b.company_code.trim());
+    if (b.company_code?.trim() && !company) errors.push("企業番号が正しくありません（会社から配布された番号をご確認ください）");
 
     if (errors.length) {
-      const companies = await listCompanies();
-      return html(res, 400, formPage(uid, sig, companies, b, errors));
+      return html(res, 400, formPage(uid, sig, b, errors));
     }
 
     await upsertEmployee(uid, {
-      company_id: Number(b.company_id),
+      company_id: company.id,
       name: b.name.trim().slice(0, 100),
       role_title: b.role_title.trim().slice(0, 100),
       phone: b.phone.trim(),
@@ -75,18 +74,11 @@ export default async function handler(req, res) {
   }
 
   // フォーム表示
-  const companies = await listCompanies();
-  return html(res, 200, formPage(uid, sig, companies, {}, []));
+  return html(res, 200, formPage(uid, sig, {}, []));
 }
 
 // ---- HTML ----
-function formPage(uid, sig, companies, v = {}, errors = []) {
-  const opts = companies
-    .map(
-      (c) =>
-        `<option value="${c.id}" ${String(v.company_id) === String(c.id) ? "selected" : ""}>${esc(c.name)}（${esc(c.invite_code)}）</option>`
-    )
-    .join("");
+function formPage(uid, sig, v = {}, errors = []) {
   const err = errors.length
     ? `<div class="err">${errors.map((e) => `・${esc(e)}`).join("<br>")}</div>`
     : "";
@@ -104,11 +96,9 @@ function formPage(uid, sig, companies, v = {}, errors = []) {
   <form method="POST" action="/api/register">
     <input type="hidden" name="uid" value="${esc(uid)}">
     <input type="hidden" name="sig" value="${esc(sig)}">
-    <label>会社 <span class="req">必須</span>
-      <select name="company_id" required>
-        <option value="">選択してください</option>
-        ${opts}
-      </select>
+    <label>企業番号 <span class="req">必須</span>
+      <input name="company_code" required maxlength="20" value="${esc(v.company_code || "")}" placeholder="会社から配布された番号（例：1234）" autocomplete="off">
+      <span class="hint">会社から配布された「企業番号」を入力してください</span>
     </label>
     <label>氏名 <span class="req">必須</span>
       <input name="name" required maxlength="100" value="${esc(v.name || "")}" placeholder="山田 太郎">
@@ -142,6 +132,7 @@ function page(title, body) {
   label{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:600}
   input,select{font-size:16px;padding:12px;border:1px solid #ccc;border-radius:10px;background:#fff}
   .req{color:#c0392b;font-size:11px;font-weight:600} .opt{color:#888;font-size:11px;font-weight:600}
+  .hint{color:#888;font-size:12px;font-weight:400}
   button{margin-top:6px;padding:14px;font-size:16px;font-weight:700;color:#fff;background:#06c755;border:0;border-radius:12px}
   .err{background:#fdecea;color:#b02a1e;border:1px solid #f5c6c0;border-radius:10px;padding:12px;font-size:14px;line-height:1.7}
   p{font-size:15px;line-height:1.8}
