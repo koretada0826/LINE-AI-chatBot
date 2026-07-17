@@ -16,6 +16,15 @@ const esc = (s) =>
   );
 
 export default async function handler(req, res) {
+  // 閲覧専用プレビュー（署名不要・入力の中身を見るだけ。送信はできない）
+  if (req.method === "GET" && req.query?.preview) {
+    return html(
+      res,
+      200,
+      formPage("preview", "preview", { company_code: req.query?.cc || "" }, [])
+    );
+  }
+
   const uid = req.query?.uid || req.body?.uid;
   const sig = req.query?.sig || req.body?.sig;
 
@@ -79,7 +88,7 @@ export default async function handler(req, res) {
 }
 
 // ---- HTML ----
-function formPage(uid, sig, v = {}, errors = []) {
+export function formPage(uid, sig, v = {}, errors = []) {
   const err = errors.length
     ? `<div class="err">${errors.map((e) => `・${esc(e)}`).join("<br>")}</div>`
     : "";
