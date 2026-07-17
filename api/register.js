@@ -73,8 +73,9 @@ export default async function handler(req, res) {
     );
   }
 
-  // フォーム表示
-  return html(res, 200, formPage(uid, sig, {}, []));
+  // フォーム表示（チャットで入力済みの企業番号があれば cc で受け取り事前入力）
+  const prefill = { company_code: (req.query?.cc || "").toString().trim().slice(0, 20) };
+  return html(res, 200, formPage(uid, sig, prefill, []));
 }
 
 // ---- HTML ----
