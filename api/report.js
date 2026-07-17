@@ -12,6 +12,7 @@ import {
   reportToHtml,
 } from "../lib/report.js";
 import { getCompanyByReportToken, getCompany } from "../lib/tenant.js";
+import { execSummary } from "../lib/ai.js";
 
 const REPORT_TOKEN = process.env.REPORT_ACCESS_TOKEN; // 運営マスタ（全社閲覧）
 
@@ -43,8 +44,26 @@ export default async function handler(req, res) {
   if (!rep) return res.status(500).send("report unavailable (Supabase未接続の可能性)");
 
   if (format === "html") {
+    // AI経営サマリーを生成（匿名集計データのみ渡す）。失敗時は数字レポートにフォールバック。
+    let exec = null;
+    if (rep.total > 0 && req.query?.ai !== "0") {
+      try {
+        exec = await execSummary({
+          companyName,
+          periodLabel,
+          total: rep.total,
+          prevTotal: rep.prevTotal,
+          escalations: rep.escalations,
+          prevEscalations: rep.prevEscalations,
+          categoryTrends: rep.categoryTrends,
+          topics: rep.byTopic.slice(0, 10),
+        });
+      } catch (e) {
+        console.error("execSummary failed:", e.message);
+      }
+    }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    return res.status(200).send(reportToHtml(rep, companyName, periodLabel));
+    return res.status(200).send(reportToHtml(rep, companyName, periodLabel, exec));
   }
   if (format === "csv") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
