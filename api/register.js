@@ -6,7 +6,9 @@
 // ============================================================
 import { verifyUid } from "../lib/formauth.js";
 import { getCompanyByCode, upsertEmployee } from "../lib/tenant.js";
-import { pushText } from "../lib/line.js";
+import { pushMessages } from "../lib/line.js";
+import { getCompanyMentors } from "../lib/mentors.js";
+import { mentorWelcome } from "../lib/mentorui.js";
 
 const PHONE_RE = /^[0-9+\-() ]{10,15}$/;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -61,12 +63,20 @@ export default async function handler(req, res) {
       registered: true,
     });
 
-    // LINEにも完了通知（フォームを閉じてLINEに戻ると届く）
+    // LINEにも完了通知＋メンター紹介（フォームを閉じてLINEに戻ると届く）
     try {
-      await pushText(
-        uid,
-        `登録が完了しました🎉 ありがとうございます、${esc(b.name.trim())}さん。\nここは、仕事のモヤモヤやしんどさを社外の相手にこっそり話せる場所です。上司や人事に伝わることはないので、安心してくださいね。\nどんなことでも、話しかけてください。`
-      );
+      const completion = {
+        type: "text",
+        text: `登録が完了しました🎉 ありがとうございます、${b.name.trim()}さん。\nここは、仕事のモヤモヤやしんどさを社外の相手にこっそり話せる場所です。上司や人事に伝わることはないので、安心してくださいね。\nどんなことでも、話しかけてください。`,
+      };
+      let msgs = [completion];
+      try {
+        const mentors = await getCompanyMentors(company.id);
+        msgs = msgs.concat(mentorWelcome(mentors)); // 登録直後にメンターを表示
+      } catch (e) {
+        console.error("mentor welcome build error:", e.message);
+      }
+      await pushMessages(uid, msgs);
     } catch (e) {
       console.error("register push error:", e.message);
     }

@@ -3,7 +3,7 @@
 // 流れ：署名検証 → イベント処理 → 会話履歴読込 → 安全ガード →
 //       Claude で一次対応＋区分判定 → LINE返信 → 履歴/ログ保存 → 必要ならエスカレーション通知
 // ============================================================
-import { verifySignature, replyText, replyMessages } from "../lib/line.js";
+import { verifySignature, replyText, replyMessages, pushMessages } from "../lib/line.js";
 import { consult } from "../lib/ai.js";
 import { detectCritical } from "../lib/safety.js";
 import {
@@ -21,7 +21,20 @@ import { sendOperatorAlert } from "../lib/notify.js";
 import { getEmployee } from "../lib/tenant.js";
 import { handleOnboarding, isRegistered } from "../lib/onboarding.js";
 import { getCompanyMentors, getMentor } from "../lib/mentors.js";
-import { mentorCarousel } from "../lib/mentorui.js";
+import { mentorCarousel, mentorWelcome } from "../lib/mentorui.js";
+
+// 登録完了（チャット経由）直後に、メンター紹介カードをプッシュする
+async function maybePushMentorsAfterRegister(userId, r) {
+  if (!r?.registered) return;
+  try {
+    const emp = await getEmployee(userId);
+    const mentors = await getCompanyMentors(emp?.company_id);
+    const msgs = mentorWelcome(mentors);
+    if (msgs.length) await pushMessages(userId, msgs);
+  } catch (e) {
+    console.error("mentor welcome push error:", e.message);
+  }
+}
 
 // 有人テイクオーバー（緊急時にBotが引いて人が対応するモード）を使うか
 const ENABLE_HUMAN_TAKEOVER = process.env.ENABLE_HUMAN_TAKEOVER === "true";
@@ -241,6 +254,7 @@ export default async function handler(req, res) {
           if (!isRegistered(emp)) {
             const r = await handleOnboarding(userId, event);
             await replyMessages(event.replyToken, r.messages);
+            await maybePushMentorsAfterRegister(userId, r);
             return;
           }
           const data = event.postback?.data || "";
@@ -262,6 +276,7 @@ export default async function handler(req, res) {
             if (event.message?.type === "text") {
               const r = await handleOnboarding(userId, event);
               await replyMessages(event.replyToken, r.messages);
+              await maybePushMentorsAfterRegister(userId, r);
             } else {
               await replyText(
                 event.replyToken,
