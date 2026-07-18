@@ -21,7 +21,7 @@ import { sendOperatorAlert } from "../lib/notify.js";
 import { getEmployee } from "../lib/tenant.js";
 import { handleOnboarding, isRegistered } from "../lib/onboarding.js";
 import { getCompanyMentors, getMentor } from "../lib/mentors.js";
-import { mentorCarousel, mentorWelcome, emergencyFlex } from "../lib/mentorui.js";
+import { mentorCarousel, mentorWelcome, emergencyFlex, humanQuickReply } from "../lib/mentorui.js";
 
 // 登録完了（チャット経由）直後に、メンター紹介カードをプッシュする
 async function maybePushMentorsAfterRegister(userId, r) {
@@ -118,6 +118,39 @@ async function showMentors(event, employee) {
   await replyMessages(event.replyToken, [intro, mentorCarousel(mentors)]);
 }
 
+// 「相談する」＝チャット(AI) と メンター(人) の両方を提示
+async function showConsultMenu(event) {
+  await replyMessages(event.replyToken, [
+    {
+      type: "text",
+      text:
+        "ご相談ですね😊 どちらでお話ししますか？\n\n" +
+        "💬 このままチャットで、まず私（AI）に話す\n" +
+        "🗣️ 担当のメンター（人）に相談する\n\n" +
+        "下から選んでくださいね。",
+      quickReply: {
+        items: [
+          { type: "action", action: { type: "postback", label: "💬 チャットで相談", data: "chat_consult", displayText: "チャットで相談したい" } },
+          { type: "action", action: { type: "postback", label: "🗣️ メンターに相談", data: "want_human", displayText: "メンターに相談" } },
+        ],
+      },
+    },
+  ]);
+}
+
+// 「チャットで相談」を選んだとき＝そのままAIが聞く姿勢に入る
+async function startChatConsult(event) {
+  await replyMessages(event.replyToken, [
+    {
+      type: "text",
+      text:
+        "はい、このままお聞きしますね😊\n" +
+        "いま、どんなことが気になっていますか？ 些細なことでも大丈夫です。ゆっくりで大丈夫ですよ。",
+      quickReply: humanQuickReply(),
+    },
+  ]);
+}
+
 // 「今すぐ相談」（緊急・死にたい等）＝メンターとは別。緊急窓口＋運営へ即連携。
 async function handleUrgent(event, employee) {
   await replyMessages(event.replyToken, [emergencyFlex()]);
@@ -164,6 +197,12 @@ async function handleTextMessage(event, employee) {
     await sendOperatorAlert(
       `📩 対応中の相談者から新しいメッセージです（ユーザーID: ${userId}）\n「${userText}」\n→ LINEの「チャット」からご対応ください。`
     );
+    return;
+  }
+
+  // 0.5) 「相談する」メニュー（=「相談したいです」）→ チャット/メンターの両方を提示
+  if (userText.trim() === "相談したいです") {
+    await showConsultMenu(event);
     return;
   }
 
@@ -266,7 +305,11 @@ export default async function handler(req, res) {
             return;
           }
           const data = event.postback?.data || "";
-          if (data === "want_human") {
+          if (data === "consult_menu") {
+            await showConsultMenu(event);
+          } else if (data === "chat_consult") {
+            await startChatConsult(event);
+          } else if (data === "want_human") {
             await showMentors(event, emp);
           } else if (data === "want_now") {
             await handleUrgent(event, emp);
