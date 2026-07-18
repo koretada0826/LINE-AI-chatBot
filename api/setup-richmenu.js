@@ -32,6 +32,17 @@ export default async function handler(req, res) {
     const token = await getAccessToken();
     const auth = { Authorization: `Bearer ${token}` };
 
+    // 0) 既存のリッチメニューを全削除（再実行時に増殖させない）
+    try {
+      const list = await fetch("https://api.line.me/v2/bot/richmenu/list", { headers: auth });
+      const { richmenus = [] } = await list.json();
+      for (const rm of richmenus) {
+        await fetch(`https://api.line.me/v2/bot/richmenu/${rm.richMenuId}`, { method: "DELETE", headers: auth });
+      }
+    } catch (e) {
+      console.error("richmenu cleanup error:", e.message);
+    }
+
     // 1) 作成
     const created = await fetch("https://api.line.me/v2/bot/richmenu", {
       method: "POST",

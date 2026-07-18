@@ -21,7 +21,7 @@ import { sendOperatorAlert } from "../lib/notify.js";
 import { getEmployee } from "../lib/tenant.js";
 import { handleOnboarding, isRegistered } from "../lib/onboarding.js";
 import { getCompanyMentors, getMentor } from "../lib/mentors.js";
-import { mentorCarousel, mentorWelcome } from "../lib/mentorui.js";
+import { mentorCarousel, mentorWelcome, emergencyFlex } from "../lib/mentorui.js";
 
 // 登録完了（チャット経由）直後に、メンター紹介カードをプッシュする
 async function maybePushMentorsAfterRegister(userId, r) {
@@ -76,57 +76,65 @@ function withQuickReplies(text, suggested = []) {
     const s = String(label || "").trim().slice(0, 20);
     if (s) items.push({ type: "action", action: { type: "message", label: s, text: s } });
   }
-  // 常に有人接続の入口を添える（要件5-2：能動的に人へ切り替えられるように）
-  // 「人と話したい」＝落ち着いて相談 ／「今すぐ相談したい」＝緊急性の高い即時
+  // 常に有人接続の入口を添える
+  // 「メンターに相談」＝急ぎでない有人相談 ／「今すぐ相談」＝緊急（別対応）
   items.push({
     type: "action",
     action: {
       type: "postback",
-      label: "🗣️ 人と話したい",
+      label: "🗣️ メンターに相談",
       data: "want_human",
-      displayText: "人と話したい",
+      displayText: "メンターに相談",
     },
   });
   items.push({
     type: "action",
     action: {
       type: "postback",
-      label: "⚡ 今すぐ相談したい",
+      label: "🚨 今すぐ相談",
       data: "want_now",
-      displayText: "今すぐ相談したい",
+      displayText: "今すぐ相談",
     },
   });
   return { type: "text", text, quickReply: { items: items.slice(0, 13) } };
 }
 
-// メンター一覧を出す（人と話したい／今すぐ相談）。繋ぎ先は後で接続（今は表示＋運営通知のスタブ）。
-async function showMentors(event, employee, { urgent }) {
+// 「メンターに相談」（急ぎでない）＝会社の3名から選ぶカルーセルを表示
+async function showMentors(event, employee) {
   const companyId = employee?.company_id ?? null;
   const mentors = await getCompanyMentors(companyId);
   if (!mentors.length) {
-    // メンター未設定の会社：スタブ対応（担当へ通知）
-    await replyText(
-      event.replyToken,
-      urgent
-        ? "今すぐ相談のご希望、承りました🤝\n担当より順番におつなぎしますので、少しお待ちくださいね。\n（お急ぎで危険を感じるときは、よりそいホットライン 0120-279-338 も24時間）"
-        : "担当のメンターにおつなぎします🤝\n少しだけお待ちくださいね。"
-    );
+    await replyText(event.replyToken, "担当のメンターにおつなぎします🤝\n少しだけお待ちくださいね。");
     await sendOperatorAlert(
-      `🙋 ${urgent ? "【今すぐ相談】" : "有人相談ご希望"}（会社にメンター未設定）\n会社ID: ${companyId ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}`
+      `🙋 メンター相談ご希望（会社にメンター未設定）\n会社ID: ${companyId ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}`
     );
     return;
   }
-  const intro = urgent
-    ? {
-        type: "text",
-        text: "⚡ 今すぐ話せるメンターです。\n気になる人の「💬 この人に相談する」を押してくださいね。",
-      }
-    : {
-        type: "text",
-        text:
-          "あなたの会社のメンターです😊\nどなたにも、上司や人事に知られず匿名で本音を相談できます。\n気になる人の「💬 この人に相談する」を押してください。",
-      };
-  await replyMessages(event.replyToken, [intro, mentorCarousel(mentors, { urgent })]);
+  const intro = {
+    type: "text",
+    text:
+      "あなたの会社のメンターです😊\nどなたにも、上司や人事に知られず匿名で本音を相談できます。\n気になる人の「💬 この人に相談する」を押してください。",
+  };
+  await replyMessages(event.replyToken, [intro, mentorCarousel(mentors)]);
+}
+
+// 「今すぐ相談」（緊急・死にたい等）＝メンターとは別。緊急窓口＋運営へ即連携。
+async function handleUrgent(event, employee) {
+  await replyMessages(event.replyToken, [emergencyFlex()]);
+  await sendOperatorAlert(
+    `🚨【今すぐ相談】緊急ボタンが押されました。至急ご対応ください。\n会社ID: ${employee?.company_id ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}`
+  );
+}
+
+// 「運営に今すぐつないで」→ 運営へ最優先の接続要請
+async function handleUrgentConnect(event, employee) {
+  await replyText(
+    event.replyToken,
+    "運営の担当に、今すぐおつなぎしています。少しだけ、このままお待ちくださいね。\nあなたはひとりではありません。"
+  );
+  await sendOperatorAlert(
+    `🚨🚨 至急接続要請（「運営に今すぐつないで」）\n会社ID: ${employee?.company_id ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}\n→ 最優先で対応してください。`
+  );
 }
 
 // メンターが選ばれたとき（繋ぎ先は後で接続。今は受付＋運営通知のスタブ）
@@ -259,9 +267,11 @@ export default async function handler(req, res) {
           }
           const data = event.postback?.data || "";
           if (data === "want_human") {
-            await showMentors(event, emp, { urgent: false });
+            await showMentors(event, emp);
           } else if (data === "want_now") {
-            await showMentors(event, emp, { urgent: true });
+            await handleUrgent(event, emp);
+          } else if (data === "urgent_connect") {
+            await handleUrgentConnect(event, emp);
           } else if (data.startsWith("mentor:")) {
             await handleMentorPick(event, emp, Number(data.split(":")[1]));
           }
