@@ -27,9 +27,10 @@ create table if not exists company_mentors (
   primary key (company_id, mentor_id)
 );
 
--- 既存テーブルに status/next_available が無い場合の追加（再実行安全）
+-- 既存テーブルに列が無い場合の追加（再実行安全）
 alter table mentors add column if not exists status text default 'available';
 alter table mentors add column if not exists next_available text;
+alter table mentors add column if not exists booking_url text; -- Spir等の予約ページURL
 
 -- セキュリティ：RLS有効（service_roleのみバイパスで利用）
 alter table mentors         enable row level security;
@@ -63,6 +64,9 @@ where not exists (select 1 from mentors where display_name='朝日田 果南');
 update mentors set avatar_url='https://line-ai-chat-bot-eosin.vercel.app/mentors/okamoto.png', accent_color='#7E6FBF' where display_name='岡本希実';
 update mentors set avatar_url='https://line-ai-chat-bot-eosin.vercel.app/mentors/sakata.png',  accent_color='#9B6FBF' where display_name='坂田真有';
 update mentors set avatar_url='https://line-ai-chat-bot-eosin.vercel.app/mentors/asahida.png', accent_color='#3E5AA6' where display_name='朝日田 果南';
+
+-- Spir予約URL（もらった分だけ設定。未提供の人は受付フォールバック）
+update mentors set booking_url='https://app.spirinc.com/t/L-gP_tEKlNTmjmIYfvmRh/as/tQRbfA7objY4WHWUOnyYA/confirm' where display_name='岡本希実';
 
 -- 2630（Uniboost）の担当を「岡本・坂田・朝日田」の3名に設定
 delete from company_mentors where company_id = (select id from companies where invite_code='2630');
