@@ -22,7 +22,7 @@ import { sendOperatorAlert } from "../lib/notify.js";
 import { getEmployee } from "../lib/tenant.js";
 import { handleOnboarding, isRegistered } from "../lib/onboarding.js";
 import { getCompanyMentors, getMentor } from "../lib/mentors.js";
-import { mentorCarousel, mentorWelcome, emergencyFlex, humanQuickReply } from "../lib/mentorui.js";
+import { mentorCarousel, mentorWelcome, emergencyFlex, humanQuickReply, chatReturnQuickReply } from "../lib/mentorui.js";
 
 // 登録完了（チャット経由）直後に、メンター紹介カードをプッシュする
 async function maybePushMentorsAfterRegister(userId, r) {
@@ -127,9 +127,11 @@ async function showMentors(event, employee) {
   const intro = {
     type: "text",
     text:
-      "あなたの会社のメンターです😊\nどなたにも、上司や人事に知られず匿名で本音を相談できます。\n気になる人の「💬 この人に相談する」を押してください。",
+      "あなたの会社のメンターです😊\nどなたにも、上司や人事に知られず匿名で本音を相談できます。\n気になる人の「💬 この人に相談する」を押してください。\n\n（このままチャットで相談したいときは、下の「💬 チャットで相談」からどうぞ）",
   };
-  await replyMessages(event.replyToken, [intro, mentorCarousel(mentors)]);
+  const carousel = mentorCarousel(mentors);
+  carousel.quickReply = chatReturnQuickReply(); // 見ただけの人がチャットへ戻れる動線
+  await replyMessages(event.replyToken, [intro, carousel]);
 }
 
 // 「相談する」＝チャット(AI) と メンター(人) の両方を提示
@@ -158,8 +160,9 @@ async function startChatConsult(event) {
     {
       type: "text",
       text:
-        "はい、このままお聞きしますね😊\n" +
-        "いま、どんなことが気になっていますか？ 些細なことでも大丈夫です。ゆっくりで大丈夫ですよ。",
+        "はい、このままお聞きしますね😊\n\n" +
+        "この下の入力欄に、いま気になっていることを、そのまま書き込んでみてください。\n" +
+        "些細なことでも大丈夫。ゆっくりで大丈夫ですよ。",
       quickReply: humanQuickReply(),
     },
   ]);
