@@ -118,7 +118,13 @@ async function showMentors(event, employee) {
   const companyId = employee?.company_id ?? null;
   const mentors = await getCompanyMentors(companyId);
   if (!mentors.length) {
-    await replyText(event.replyToken, "担当のメンターにおつなぎします🤝\n少しだけお待ちくださいね。");
+    await replyMessages(event.replyToken, [
+      {
+        type: "text",
+        text: "担当のメンターにおつなぎします🤝\n運営（社外の相談窓口）から順番にご連絡しますね。\nそれまでの間、このままチャットでお話しいただいても大丈夫です。",
+        quickReply: chatReturnQuickReply(),
+      },
+    ]);
     await sendOperatorAlert(
       `🙋 メンター相談ご希望（会社にメンター未設定）\n会社ID: ${companyId ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}`
     );
@@ -193,11 +199,11 @@ async function handleFeedback(event, employee, label) {
   await saveFeedback(event.source?.userId, label, employee?.company_id ?? null);
   const msg = {
     good: "ありがとうございます！またいつでも話しかけてくださいね😊",
-    empathy: "教えてくれてありがとうございます。次はもっと、あなたの気持ちに寄り添いますね🤍",
-    solution: "ありがとうございます。次はもっと具体的な提案も一緒に出すようにしますね💡",
+    empathy: "教えてくれてありがとうございます。次はもっと、あなたの気持ちに寄り添いますね🤍\nまた話したくなったら、いつでもこの下から続けられます。",
+    solution: "ありがとうございます。次はもっと具体的な提案も一緒に出すようにしますね💡\nまた話したくなったら、いつでもこの下から続けられます。",
     skip: "ありがとうございました😊 またいつでもどうぞ。",
   }[label] || "ありがとうございました😊";
-  await replyText(event.replyToken, msg);
+  await replyMessages(event.replyToken, [{ type: "text", text: msg, quickReply: humanQuickReply() }]);
 }
 
 // 「今すぐ相談」（緊急・死にたい等）＝メンターとは別。緊急窓口＋運営へ即連携。
@@ -208,25 +214,38 @@ async function handleUrgent(event, employee) {
   );
 }
 
-// 「運営に今すぐつないで」→ 運営へ最優先の接続要請
+// 「運営に今すぐつないで」→ 運営へ最優先の接続要請（待つ間の命綱も必ず残す）
 async function handleUrgentConnect(event, employee) {
-  await replyText(
-    event.replyToken,
-    "運営の担当に、今すぐおつなぎしています。少しだけ、このままお待ちくださいね。\nあなたはひとりではありません。"
-  );
+  await replyMessages(event.replyToken, [
+    {
+      type: "text",
+      text:
+        "運営（社外の相談窓口）の担当に、最優先で連絡しました。\n" +
+        "日中はできるだけ早く、夜間や休日は順番にご連絡します。\n\n" +
+        "もし今、とてもつらいときは、下の「📞 よりそいホットライン（24時間・無料）」に、どうか遠慮なく。\n" +
+        "あなたはひとりではありません。",
+    },
+    emergencyFlex(), // 待つ間も公的窓口へ確実に届く導線を再掲
+  ]);
   await sendOperatorAlert(
     `🚨🚨 至急接続要請（「運営に今すぐつないで」）\n会社ID: ${employee?.company_id ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}\n→ 最優先で対応してください。`
   );
 }
 
-// メンターが選ばれたとき（繋ぎ先は後で接続。今は受付＋運営通知のスタブ）
+// メンターが選ばれたとき（繋ぎ先は後で接続。今は受付＋運営通知）
 async function handleMentorPick(event, employee, mentorId) {
   const m = await getMentor(mentorId);
-  const name = m?.display_name || "担当メンター";
-  await replyText(
-    event.replyToken,
-    `${name}さんですね😊 ありがとうございます。\n相談の準備を進めますね。担当より順番にご連絡しますので、少しお待ちください。\n（メンターとのやり取りの接続は、ただいま準備中です）`
-  );
+  const name = m?.display_name || "担当";
+  await replyMessages(event.replyToken, [
+    {
+      type: "text",
+      text:
+        `${name}さんですね😊 ありがとうございます。\n` +
+        `運営（社外の相談窓口）から、通常1〜2営業日以内に、このLINEでご連絡します。\n` +
+        `それまでの間、このままチャットでお話しいただいても大丈夫ですよ。`,
+      quickReply: humanQuickReply(),
+    },
+  ]);
   await sendOperatorAlert(
     `🙋 メンター指名: ${name}（id:${mentorId}）\n会社ID: ${employee?.company_id ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}\n→ このメンターへの接続をお願いします。`
   );
@@ -369,6 +388,16 @@ export default async function handler(req, res) {
         // postback（会社選択・悩みカテゴリの選択）→ 登録フロー／登録済みは有人接続希望
         if (event.type === "postback") {
           const emp = await getEmployee(userId);
+          const pdata = event.postback?.data || "";
+          // ★安全最優先：未登録でも「緊急」だけは即対応（登録に戻さない）
+          if (pdata === "want_now") {
+            await handleUrgent(event, emp);
+            return;
+          }
+          if (pdata === "urgent_connect") {
+            await handleUrgentConnect(event, emp);
+            return;
+          }
           if (!isRegistered(emp)) {
             const r = await handleOnboarding(userId, event);
             await replyMessages(event.replyToken, r.messages);
@@ -409,6 +438,14 @@ export default async function handler(req, res) {
 
           // ★未登録 → 登録が終わるまで相談機能はロック（オンボーディングへ）
           if (!isRegistered(emp)) {
+            // ★安全最優先：登録前でも危機的な発言は見逃さず、公的窓口＋運営通知
+            if (event.message?.type === "text" && detectCritical(event.message.text)) {
+              await replyMessages(event.replyToken, [emergencyFlex()]);
+              await sendOperatorAlert(
+                `🚨【危機・未登録ユーザー】至急ご対応ください。\nユーザーID: ${userId}\n発言: ${event.message.text}`
+              );
+              return;
+            }
             if (event.message?.type === "text") {
               const r = await handleOnboarding(userId, event);
               await replyMessages(event.replyToken, r.messages);
