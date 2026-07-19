@@ -181,13 +181,13 @@ async function showFeedbackSurvey(event) {
       type: "text",
       text:
         "お話しできてよかったです😊 ありがとうございました。\n" +
-        "よかったら、今回の会話はどうでしたか？（任意・ひと押しでOK）",
+        "もしよければ、次はどんなふうに話せたら、もっと安心できそうですか？（任意・ひと押しでOK）",
       quickReply: {
         items: [
-          { type: "action", action: { type: "postback", label: "😊 ちょうど良かった", data: "fb:good", displayText: "ちょうど良かった" } },
-          { type: "action", action: { type: "postback", label: "🤍 もっと寄り添って", data: "fb:empathy", displayText: "もっと寄り添ってほしい" } },
-          { type: "action", action: { type: "postback", label: "💡 もっと具体的に", data: "fb:solution", displayText: "もっと具体的にしてほしい" } },
-          { type: "action", action: { type: "postback", label: "スキップ", data: "fb:skip", displayText: "スキップ" } },
+          { type: "action", action: { type: "postback", label: "😊 このままがいい", data: "fb:good", displayText: "このままがいい" } },
+          { type: "action", action: { type: "postback", label: "🤍 もっと気持ちを聞いてほしい", data: "fb:empathy", displayText: "もっと気持ちを聞いてほしい" } },
+          { type: "action", action: { type: "postback", label: "💡 一緒に次の一手を考えたい", data: "fb:solution", displayText: "一緒に次の一手を考えたい" } },
+          { type: "action", action: { type: "postback", label: "またこんど", data: "fb:skip", displayText: "またこんど" } },
         ],
       },
     },
