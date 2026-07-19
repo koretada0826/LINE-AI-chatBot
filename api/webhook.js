@@ -12,6 +12,7 @@ import {
   logConsultation,
   getUserProfile,
   saveUserProfile,
+  saveFeedback,
   logCoverageGap,
   logEscalation,
   setHumanMode,
@@ -96,6 +97,16 @@ function withQuickReplies(text, suggested = []) {
       displayText: "今すぐ相談",
     },
   });
+  // ①会話後アンケートの入口
+  items.push({
+    type: "action",
+    action: {
+      type: "postback",
+      label: "✅ 会話を終える",
+      data: "end_chat",
+      displayText: "会話を終える",
+    },
+  });
   return { type: "text", text, quickReply: { items: items.slice(0, 13) } };
 }
 
@@ -149,6 +160,38 @@ async function startChatConsult(event) {
       quickReply: humanQuickReply(),
     },
   ]);
+}
+
+// ①会話後アンケート：「会話を終える」→ 簡単な評価を聞く
+async function showFeedbackSurvey(event) {
+  await replyMessages(event.replyToken, [
+    {
+      type: "text",
+      text:
+        "お話しできてよかったです😊 ありがとうございました。\n" +
+        "よかったら、今回の会話はどうでしたか？（任意・ひと押しでOK）",
+      quickReply: {
+        items: [
+          { type: "action", action: { type: "postback", label: "😊 ちょうど良かった", data: "fb:good", displayText: "ちょうど良かった" } },
+          { type: "action", action: { type: "postback", label: "🤍 もっと寄り添って", data: "fb:empathy", displayText: "もっと寄り添ってほしい" } },
+          { type: "action", action: { type: "postback", label: "💡 もっと具体的に", data: "fb:solution", displayText: "もっと具体的にしてほしい" } },
+          { type: "action", action: { type: "postback", label: "スキップ", data: "fb:skip", displayText: "スキップ" } },
+        ],
+      },
+    },
+  ]);
+}
+
+// ①アンケート回答を保存し、②支援スタイルの好みを学習
+async function handleFeedback(event, employee, label) {
+  await saveFeedback(event.source?.userId, label, employee?.company_id ?? null);
+  const msg = {
+    good: "ありがとうございます！またいつでも話しかけてくださいね😊",
+    empathy: "教えてくれてありがとうございます。次はもっと、あなたの気持ちに寄り添いますね🤍",
+    solution: "ありがとうございます。次はもっと具体的な提案も一緒に出すようにしますね💡",
+    skip: "ありがとうございました😊 またいつでもどうぞ。",
+  }[label] || "ありがとうございました😊";
+  await replyText(event.replyToken, msg);
 }
 
 // 「今すぐ相談」（緊急・死にたい等）＝メンターとは別。緊急窓口＋運営へ即連携。
@@ -228,6 +271,7 @@ async function handleTextMessage(event, employee) {
       profile: prof.profile,
       daysSince,
       name: employee?.name || "",
+      supportStyle: prof.support_style || null, // ②共感/解決の出し分け
     });
   } catch (err) {
     console.error("consult error:", err);
@@ -315,6 +359,10 @@ export default async function handler(req, res) {
             await handleUrgent(event, emp);
           } else if (data === "urgent_connect") {
             await handleUrgentConnect(event, emp);
+          } else if (data === "end_chat") {
+            await showFeedbackSurvey(event);
+          } else if (data.startsWith("fb:")) {
+            await handleFeedback(event, emp, data.split(":")[1]);
           } else if (data.startsWith("mentor:")) {
             await handleMentorPick(event, emp, Number(data.split(":")[1]));
           }
