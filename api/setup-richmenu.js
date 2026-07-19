@@ -16,7 +16,8 @@ const RICHMENU = {
   name: "saishoku-main",
   chatBarText: "メニュー",
   areas: [
-    { bounds: { x: 0, y: 0, width: 400, height: 405 }, action: { type: "message", text: "相談したいです" } },
+    // 相談する＝まずAIに話す → チャット直行（メンターは別ボタンにあるので2択メニューは挟まない）
+    { bounds: { x: 0, y: 0, width: 400, height: 405 }, action: { type: "postback", data: "chat_consult", displayText: "相談する" } },
     { bounds: { x: 400, y: 0, width: 400, height: 405 }, action: { type: "postback", data: "want_human", displayText: "メンターに相談" } },
     { bounds: { x: 800, y: 0, width: 400, height: 405 }, action: { type: "postback", data: "want_now", displayText: "今すぐ相談" } },
   ],
