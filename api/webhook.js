@@ -48,9 +48,10 @@ export const config = { api: { bodyParser: false } };
 
 function getRawBody(req) {
   return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk) => (data += chunk));
-    req.on("end", () => resolve(data));
+    // Bufferで受けてconcat（マルチバイト分割で日本語が壊れ→署名不一致→401再送地獄になるのを防ぐ）
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
@@ -107,7 +108,9 @@ function withQuickReplies(text, suggested = []) {
       displayText: "会話を終える",
     },
   });
-  return { type: "text", text, quickReply: { items: items.slice(0, 13) } };
+  // LINEテキスト上限(5000字)を超えると送信失敗→無応答になるため安全側で切る
+  const safeText = String(text || "").slice(0, 4900);
+  return { type: "text", text: safeText, quickReply: { items: items.slice(0, 13) } };
 }
 
 // 「メンターに相談」（急ぎでない）＝会社の3名から選ぶカルーセルを表示
@@ -275,10 +278,27 @@ async function handleTextMessage(event, employee) {
     });
   } catch (err) {
     console.error("consult error:", err);
-    await replyText(
-      event.replyToken,
-      "申し訳ありません、いま少し混み合っているようです。少し時間をおいて、もう一度お話しかけてもらえますか。"
-    );
+    // ★フェイルセーフ：AI障害でも「危機」は決定論的に人へ＋公的窓口を必ず提示
+    if (criticalHint) {
+      await replyMessages(event.replyToken, [emergencyFlex()]);
+      try {
+        await logEscalation(
+          userId,
+          { category: "escalation", risk_level: 3, topic: "（AI障害時フェイルセーフ）", summary: userText.slice(0, 200) },
+          companyId
+        );
+      } catch (e) {
+        console.error("failsafe logEscalation error:", e.message);
+      }
+      await sendOperatorAlert(
+        `🚨【危機・AI障害時フェイルセーフ】至急ご対応ください。\nユーザーID: ${userId}\n直近の発言: ${userText}`
+      );
+    } else {
+      await replyText(
+        event.replyToken,
+        "申し訳ありません、いま少し混み合っているようです。少し時間をおいて、もう一度お話しかけてもらえますか。"
+      );
+    }
     return;
   }
 
@@ -299,6 +319,10 @@ async function handleTextMessage(event, employee) {
   if (result.escalate) {
     await logEscalation(userId, result, companyId);
     await notifyEscalation(userId, result, userText);
+    // ★命・安全に関わる危機は、AIの文面に依存せず"必ず"公的窓口カードを本人へ提示
+    if (criticalHint || (result.risk_level ?? 0) >= 3) {
+      await pushMessages(userId, [emergencyFlex()]);
+    }
     if (ENABLE_HUMAN_TAKEOVER) {
       await setHumanMode(userId); // 以降しばらくBotは前に出ず、人が対応
     }
@@ -364,7 +388,15 @@ export default async function handler(req, res) {
           } else if (data.startsWith("fb:")) {
             await handleFeedback(event, emp, data.split(":")[1]);
           } else if (data.startsWith("mentor:")) {
-            await handleMentorPick(event, emp, Number(data.split(":")[1]));
+            const mid = Number(data.split(":")[1]);
+            if (Number.isFinite(mid)) {
+              await handleMentorPick(event, emp, mid);
+            } else {
+              await replyText(event.replyToken, "うまく受け取れませんでした🙏 もう一度メニューからお試しください。");
+            }
+          } else {
+            // 未知/古いボタン（旧カード等）を押されたときの無反応を防ぐ
+            await replyText(event.replyToken, "うまく受け取れませんでした🙏 下のメニューからもう一度お試しください。");
           }
           return;
         }
