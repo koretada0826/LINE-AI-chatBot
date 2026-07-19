@@ -10,8 +10,13 @@ import {
   reportToCsv,
   reportToText,
   reportToHtml,
+  reportToAdminHtml,
 } from "../lib/report.js";
-import { getCompanyByReportToken, getCompany } from "../lib/tenant.js";
+import {
+  getCompanyByReportToken,
+  getCompany,
+  listCompanies,
+} from "../lib/tenant.js";
 import { execSummary } from "../lib/ai.js";
 
 const REPORT_TOKEN = process.env.REPORT_ACCESS_TOKEN; // 運営マスタ（全社閲覧）
@@ -39,6 +44,18 @@ export default async function handler(req, res) {
   const format = req.query?.format || "html";
   const sinceDays = req.query?.since ? Number(req.query.since) : null;
   const periodLabel = sinceDays ? `直近${sinceDays}日` : "全期間";
+
+  // ★運営マスタ＋会社未指定 → 全社一覧の運営ダッシュボード（各社の件数・緊急・多いテーマ・レポートリンク）
+  if (isMaster && !companyId && format === "html") {
+    const companies = await listCompanies();
+    const rows = [];
+    for (const c of companies) {
+      const r = await generateReport(c.id, sinceDays);
+      rows.push({ id: c.id, name: c.name, invite_code: c.invite_code, rep: r });
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(reportToAdminHtml(rows, periodLabel, token));
+  }
 
   const rep = await generateReport(companyId, sinceDays);
   if (!rep) return res.status(500).send("report unavailable (Supabase未接続の可能性)");
