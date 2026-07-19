@@ -5,7 +5,7 @@
 // ============================================================
 import { verifySignature, replyText, replyMessages, pushMessages } from "../lib/line.js";
 import { consult } from "../lib/ai.js";
-import { detectCritical } from "../lib/safety.js";
+import { detectCritical, detectLifeCrisis } from "../lib/safety.js";
 import {
   getHistory,
   appendTurn,
@@ -286,7 +286,8 @@ async function handleTextMessage(event, employee) {
     : null;
 
   // 2) 決定論的な安全ガード（AI判定と二重チェック）
-  const criticalHint = detectCritical(userText);
+  const criticalHint = detectCritical(userText); // 有人へ確実につなぐべき重篤語
+  const lifeCrisis = detectLifeCrisis(userText); // 命に関わる＝"命のホットライン"を出してよい場面
 
   // 3) Claude で一次対応＋区分判定（蓄積プロフィールを踏まえる＝どんどん学ぶ）
   let result;
@@ -300,8 +301,8 @@ async function handleTextMessage(event, employee) {
     });
   } catch (err) {
     console.error("consult error:", err);
-    // ★フェイルセーフ：AI障害でも「危機」は決定論的に人へ＋公的窓口を必ず提示
-    if (criticalHint) {
+    // ★フェイルセーフ：AI障害でも「命の危機」は決定論的に公的窓口を提示
+    if (lifeCrisis) {
       await replyMessages(event.replyToken, [emergencyFlex()]);
       try {
         await logEscalation(
@@ -313,8 +314,18 @@ async function handleTextMessage(event, employee) {
         console.error("failsafe logEscalation error:", e.message);
       }
       await sendOperatorAlert(
-        `🚨【危機・AI障害時フェイルセーフ】至急ご対応ください。\nユーザーID: ${userId}\n直近の発言: ${userText}`
+        `🚨【命の危機・AI障害時フェイルセーフ】至急ご対応ください。\nユーザーID: ${userId}\n直近の発言: ${userText}`
       );
+    } else if (criticalHint) {
+      // 重篤だが命の危機ワードではない（ハラス/暴力/不正等）→ ホットラインは出さず、人へ確実につなぐ
+      await replyText(
+        event.replyToken,
+        "大切なお話、受け止めました。\nいま一時的に応答が不安定なため、担当（運営）に確実に引き継ぎます。少しお待ちくださいね。"
+      );
+      try {
+        await logEscalation(userId, { category: "escalation", risk_level: 2, topic: "（AI障害時フェイルセーフ）", summary: userText.slice(0, 200) }, companyId);
+      } catch (e) { console.error("failsafe logEscalation error:", e.message); }
+      await sendOperatorAlert(`⚠️【要対応・AI障害時】担当につないでください。\nユーザーID: ${userId}\n直近の発言: ${userText}`);
     } else {
       await replyText(
         event.replyToken,
@@ -337,17 +348,17 @@ async function handleTextMessage(event, employee) {
   await saveUserProfile(userId, result.profile_update);
   await logCoverageGap(userId, result);
 
-  // 6) 緊急なら「人へつなぐ」：記録＋運営へアラート（＋設定時は有人へ引き継ぎ）
+  // 6) エスカレーション：記録＋運営へアラート（有人へつなぐ）。※これは裏側の通知で、利用者体験は変えない
   if (result.escalate) {
     await logEscalation(userId, result, companyId);
     await notifyEscalation(userId, result, userText);
-    // ★命・安全に関わる危機は、AIの文面に依存せず"必ず"公的窓口カードを本人へ提示
-    if (criticalHint || (result.risk_level ?? 0) >= 3) {
-      await pushMessages(userId, [emergencyFlex()]);
-    }
     if (ENABLE_HUMAN_TAKEOVER) {
       await setHumanMode(userId); // 以降しばらくBotは前に出ず、人が対応
     }
+  }
+  // ★"命のホットライン"カードは、命に関わる危機のときだけ提示（パワハラ等では出さない）
+  if (lifeCrisis) {
+    await pushMessages(userId, [emergencyFlex()]);
   }
 }
 
@@ -438,11 +449,11 @@ export default async function handler(req, res) {
 
           // ★未登録 → 登録が終わるまで相談機能はロック（オンボーディングへ）
           if (!isRegistered(emp)) {
-            // ★安全最優先：登録前でも危機的な発言は見逃さず、公的窓口＋運営通知
-            if (event.message?.type === "text" && detectCritical(event.message.text)) {
+            // ★安全最優先：登録前でも"命に関わる"発言は見逃さず、公的窓口＋運営通知
+            if (event.message?.type === "text" && detectLifeCrisis(event.message.text)) {
               await replyMessages(event.replyToken, [emergencyFlex()]);
               await sendOperatorAlert(
-                `🚨【危機・未登録ユーザー】至急ご対応ください。\nユーザーID: ${userId}\n発言: ${event.message.text}`
+                `🚨【命の危機・未登録ユーザー】至急ご対応ください。\nユーザーID: ${userId}\n発言: ${event.message.text}`
               );
               return;
             }
