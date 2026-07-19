@@ -56,6 +56,7 @@ export default async function handler(req, res) {
       company_id: company.id,
       name: b.name.trim().slice(0, 100),
       role_title: b.role_title.trim().slice(0, 100),
+      department: (b.department || "").trim().slice(0, 100) || null,
       phone: b.phone.trim(),
       email: b.email.trim(),
       concern_category: (b.concern_category || "").trim().slice(0, 100) || null,
@@ -125,6 +126,10 @@ export function formPage(uid, sig, v = {}, errors = []) {
     </label>
     <label>役職 <span class="req">必須</span>
       <input name="role_title" required maxlength="100" value="${esc(v.role_title || "")}" placeholder="一般社員 / 主任 / 部長 など">
+    </label>
+    <label>部署 <span class="opt">任意</span>
+      <input name="department" maxlength="100" value="${esc(v.department || "")}" placeholder="営業部 / 開発部 / 管理部 など">
+      <span class="hint">部署ごとの傾向を経営レポートに反映するために使います（匿名集計のみ）</span>
     </label>
     <label>電話番号 <span class="req">必須</span>
       <input name="phone" type="tel" required value="${esc(v.phone || "")}" placeholder="090-1234-5678">

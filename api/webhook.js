@@ -343,7 +343,7 @@ async function handleTextMessage(event, employee) {
   // 5) 履歴・ログ・学習を保存（会社IDで分離・集計）
   await appendTurn(userId, "user", userText, companyId);
   await appendTurn(userId, "assistant", result.reply, companyId);
-  await logConsultation(userId, result, companyId);
+  await logConsultation(userId, result, companyId, employee?.department ?? null);
   // 継続学習：相手のプロフィールを積み上げ更新し、ナレッジの穴を記録する
   await saveUserProfile(userId, result.profile_update);
   await logCoverageGap(userId, result);
