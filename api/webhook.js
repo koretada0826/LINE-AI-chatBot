@@ -3,7 +3,7 @@
 // 流れ：署名検証 → イベント処理 → 会話履歴読込 → 安全ガード →
 //       Claude で一次対応＋区分判定 → LINE返信 → 履歴/ログ保存 → 必要ならエスカレーション通知
 // ============================================================
-import { verifySignature, replyText, replyMessages, pushMessages } from "../lib/line.js";
+import { verifySignature, replyText, replyMessages, pushMessages, showLoading } from "../lib/line.js";
 import { consult } from "../lib/ai.js";
 import { detectCritical, detectLifeCrisis } from "../lib/safety.js";
 import {
@@ -290,6 +290,8 @@ async function handleTextMessage(event, employee) {
   const lifeCrisis = detectLifeCrisis(userText); // 命に関わる＝"命のホットライン"を出してよい場面
 
   // 3) Claude で一次対応＋区分判定（蓄積プロフィールを踏まえる＝どんどん学ぶ）
+  //    生成には数秒かかるため、先に「考え中…」のローディングを表示（返信到着で自動的に消える）
+  await showLoading(userId, 20);
   let result;
   try {
     result = await consult(history, {
