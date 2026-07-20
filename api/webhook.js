@@ -25,7 +25,7 @@ import { sendOperatorAlert } from "../lib/notify.js";
 import { getEmployee } from "../lib/tenant.js";
 import { handleOnboarding, isRegistered } from "../lib/onboarding.js";
 import { getCompanyMentors, getMentor } from "../lib/mentors.js";
-import { mentorCarousel, mentorWelcome, emergencyFlex, humanQuickReply, chatReturnQuickReply } from "../lib/mentorui.js";
+import { mentorCarousel, mentorWelcome, emergencyFlex, urgentLightFlex, humanQuickReply, chatReturnQuickReply } from "../lib/mentorui.js";
 
 // 登録完了（チャット経由）直後に、メンター紹介カードをプッシュする
 async function maybePushMentorsAfterRegister(userId, r) {
@@ -233,11 +233,12 @@ async function handleFeedbackReason(event, pending, reasonText) {
   ]);
 }
 
-// 「今すぐ相談」（緊急・死にたい等）＝メンターとは別。緊急窓口＋運営へ即連携。
+// 「今すぐ相談」ボタン＝急ぎで運営（社外）につなぐ。命のホットラインは出さない（軽い案内）。
+// ※本当の命の危機は、発言のワード検知(detectLifeCrisis)時に emergencyFlex() を別途出す。
 async function handleUrgent(event, employee) {
-  await replyMessages(event.replyToken, [emergencyFlex()]);
+  await replyMessages(event.replyToken, [urgentLightFlex()]);
   await sendOperatorAlert(
-    `🚨【今すぐ相談】緊急ボタンが押されました。至急ご対応ください。\n会社ID: ${employee?.company_id ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}`
+    `📞【今すぐ相談】急ぎ相談ボタンが押されました。ご対応をお願いします。\n会社ID: ${employee?.company_id ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}`
   );
 }
 
@@ -248,11 +249,10 @@ async function handleUrgentConnect(event, employee) {
       type: "text",
       text:
         "運営（社外の相談窓口）の担当に、最優先で連絡しました。\n" +
-        "日中はできるだけ早く、夜間や休日は順番にご連絡します。\n\n" +
-        "もし今、とてもつらいときは、下の「📞 よりそいホットライン（24時間・無料）」に、どうか遠慮なく。\n" +
-        "あなたはひとりではありません。",
+        "日中はできるだけ早く、夜間や休日は順番にご連絡しますね。\n\n" +
+        "つながるまでの間も、よければこのままここでお話を聞かせてください。",
+      quickReply: humanQuickReply(),
     },
-    emergencyFlex(), // 待つ間も公的窓口へ確実に届く導線を再掲
   ]);
   await sendOperatorAlert(
     `🚨🚨 至急接続要請（「運営に今すぐつないで」）\n会社ID: ${employee?.company_id ?? "-"} / 氏名: ${employee?.name || "-"}\nユーザーID: ${event.source?.userId}\n→ 最優先で対応してください。`
