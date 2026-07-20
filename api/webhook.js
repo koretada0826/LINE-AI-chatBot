@@ -13,6 +13,9 @@ import {
   getUserProfile,
   saveUserProfile,
   saveFeedback,
+  saveFeedbackRating,
+  saveFeedbackReason,
+  clearPendingFeedback,
   logCoverageGap,
   logEscalation,
   setHumanMode,
@@ -174,36 +177,60 @@ async function startChatConsult(event) {
   ]);
 }
 
-// ①会話後アンケート：「会話を終える」→ 簡単な評価を聞く
+// ①会話後アンケート：「会話を終える」→ 1〜5で評価してもらう
 async function showFeedbackSurvey(event) {
   await replyMessages(event.replyToken, [
     {
       type: "text",
       text:
         "お話しできてよかったです😊 ありがとうございました。\n" +
-        "もしよければ、次はどんなふうに話せたら、もっと安心できそうですか？（任意・ひと押しでOK）",
+        "よろしければ、今日のやりとりを1〜5で評価してもらえますか？\n" +
+        "（5がとても良い・1があまり良くない）",
       quickReply: {
         items: [
-          { type: "action", action: { type: "postback", label: "😊 このままがいい", data: "fb:good", displayText: "このままがいい" } },
-          { type: "action", action: { type: "postback", label: "🤍 もっと気持ちを聞いてほしい", data: "fb:empathy", displayText: "もっと気持ちを聞いてほしい" } },
-          { type: "action", action: { type: "postback", label: "💡 一緒に次の一手を考えたい", data: "fb:solution", displayText: "一緒に次の一手を考えたい" } },
-          { type: "action", action: { type: "postback", label: "またこんど", data: "fb:skip", displayText: "またこんど" } },
+          { type: "action", action: { type: "postback", label: "⭐️1", data: "fb_rate:1", displayText: "1" } },
+          { type: "action", action: { type: "postback", label: "⭐️2", data: "fb_rate:2", displayText: "2" } },
+          { type: "action", action: { type: "postback", label: "⭐️3", data: "fb_rate:3", displayText: "3" } },
+          { type: "action", action: { type: "postback", label: "⭐️4", data: "fb_rate:4", displayText: "4" } },
+          { type: "action", action: { type: "postback", label: "⭐️5", data: "fb_rate:5", displayText: "5" } },
+          { type: "action", action: { type: "postback", label: "スキップ", data: "fb_skip", displayText: "スキップ" } },
         ],
       },
     },
   ]);
 }
 
-// ①アンケート回答を保存し、②支援スタイルの好みを学習
-async function handleFeedback(event, employee, label) {
-  await saveFeedback(event.source?.userId, label, employee?.company_id ?? null);
-  const msg = {
-    good: "ありがとうございます！またいつでも話しかけてくださいね😊",
-    empathy: "教えてくれてありがとうございます。次はもっと、あなたの気持ちに寄り添いますね🤍\nまた話したくなったら、いつでもこの下から続けられます。",
-    solution: "ありがとうございます。次はもっと具体的な提案も一緒に出すようにしますね💡\nまた話したくなったら、いつでもこの下から続けられます。",
-    skip: "ありがとうございました😊 またいつでもどうぞ。",
-  }[label] || "ありがとうございました😊";
-  await replyMessages(event.replyToken, [{ type: "text", text: msg, quickReply: humanQuickReply() }]);
+// ①評価(1〜5)を保存し、続けて「理由」を自由記述で聞く（次の発言を理由として拾う状態にする）
+async function handleFeedbackRating(event, employee, rating) {
+  const userId = event.source?.userId;
+  await saveFeedbackRating(userId, rating, employee?.company_id ?? null);
+  await replyMessages(event.replyToken, [
+    {
+      type: "text",
+      text:
+        `${"⭐️".repeat(rating)}（${rating}）ですね。ありがとうございます！\n\n` +
+        "差し支えなければ、その評価の理由を、このまま入力して教えてもらえますか？\n" +
+        "（良かった点・物足りなかった点など、ひと言でもOK）",
+      quickReply: {
+        items: [
+          { type: "action", action: { type: "postback", label: "理由はスキップ", data: "fb_reason_skip", displayText: "スキップ" } },
+        ],
+      },
+    },
+  ]);
+}
+
+// ①評価の「理由」を保存（直前の評価に追記）して、待ち状態を解除
+async function handleFeedbackReason(event, pending, reasonText) {
+  const userId = event.source?.userId;
+  await saveFeedbackReason(userId, pending, reasonText);
+  await replyMessages(event.replyToken, [
+    {
+      type: "text",
+      text: "教えてくれて、ありがとうございます😊 いただいた声は、これからの改善に活かします。\nまた話したくなったら、いつでもこの下から続けられます。",
+      quickReply: humanQuickReply(),
+    },
+  ]);
 }
 
 // 「今すぐ相談」（緊急・死にたい等）＝メンターとは別。緊急窓口＋運営へ即連携。
@@ -279,6 +306,13 @@ async function handleTextMessage(event, employee) {
     getHistory(userId),
     getUserProfile(userId),
   ]);
+
+  // ①会話後アンケートの「理由」待ち：この発言は相談ではなく"評価の理由"として保存する
+  if (prof.pending_feedback) {
+    await handleFeedbackReason(event, prof.pending_feedback, userText);
+    return;
+  }
+
   history.push({ role: "user", content: userText });
   // 前回の相談からの経過日数（「お久しぶりです」等の自然な会話に使う）
   const daysSince = prof.updated_at
@@ -430,8 +464,16 @@ export default async function handler(req, res) {
             await handleUrgentConnect(event, emp);
           } else if (data === "end_chat") {
             await showFeedbackSurvey(event);
-          } else if (data.startsWith("fb:")) {
-            await handleFeedback(event, emp, data.split(":")[1]);
+          } else if (data.startsWith("fb_rate:")) {
+            const r = Number(data.split(":")[1]);
+            if (r >= 1 && r <= 5) await handleFeedbackRating(event, emp, r);
+          } else if (data === "fb_skip") {
+            await replyText(event.replyToken, "ありがとうございました😊 またいつでもどうぞ。");
+          } else if (data === "fb_reason_skip") {
+            await clearPendingFeedback(event.source?.userId);
+            await replyMessages(event.replyToken, [
+              { type: "text", text: "ありがとうございました😊 またいつでもどうぞ。", quickReply: humanQuickReply() },
+            ]);
           } else if (data.startsWith("mentor:")) {
             const mid = Number(data.split(":")[1]);
             if (Number.isFinite(mid)) {
